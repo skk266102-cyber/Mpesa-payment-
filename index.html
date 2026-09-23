@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>M-PESA Payment</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="card">
+    <div class="logo">M-PESA</div>
+    <h1>Pay Our Business</h1>
+    <p class="sub">Enter your M-PESA number and amount. We will send a payment prompt to your phone.</p>
+
+    <form id="paymentForm">
+      <label for="phone">M-PESA phone number</label>
+      <input id="phone" name="phone" type="tel" inputmode="numeric"
+             autocomplete="tel" placeholder="0712345678" required>
+
+      <label for="amount">Amount (KSh)</label>
+      <input id="amount" name="amount" type="number"
+             inputmode="numeric" min="1" step="1" placeholder="100" required>
+
+      <button id="payButton" type="submit">SEND PAYMENT PROMPT</button>
+    </form>
+
+    <div id="message" class="message" role="status"></div>
+
+    <div class="steps">
+      <strong>After tapping the button:</strong>
+      <ol>
+        <li>Check your phone for the M-PESA prompt.</li>
+        <li>Confirm the amount.</li>
+        <li>Enter your M-PESA PIN.</li>
+      </ol>
+    </div>
+  </main>
+
+  <script>
+    const form = document.getElementById("paymentForm");
+    const button = document.getElementById("payButton");
+    const message = document.getElementById("message");
+
+    function show(text, type = "") {
+      message.textContent = text;
+      message.className = "message " + type;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const phone = document.getElementById("phone").value.trim();
+      const amount = document.getElementById("amount").value;
+
+      button.disabled = true;
+      button.textContent = "SENDING...";
+      show("Sending the M-PESA prompt...");
+
+      try {
+        const response = await fetch("/api/stkpush", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, amount: Number(amount) })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          throw new Error(data.message || "The request failed.");
+        }
+
+        show(
+          "Prompt sent. Check " + phone +
+          " and enter your M-PESA PIN to complete the payment.",
+          "success"
+        );
+
+        if (data.checkoutRequestID) {
+          watchStatus(data.checkoutRequestID);
+        }
+      } catch (error) {
+        show(error.message, "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = "SEND PAYMENT PROMPT";
+      }
+    });
+
+    async function watchStatus(id) {
+      // Poll for up to about 2 minutes.
+      for (let i = 0; i < 24; i++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        try {
+          const response = await fetch("/api/status/" + encodeURIComponent(id));
+          const data = await response.json();
+
+          if (!data.ok) return;
+
+          const tx = data.transaction;
+
+          if (tx.status === "SUCCESS") {
+            show(
+              "Payment successful" +
+              (tx.mpesaReceiptNumber ? " — Receipt: " + tx.mpesaReceiptNumber : "."),
+              "success"
+            );
+            return;
+          }
+
+          if (tx.status === "FAILED") {
+            show(tx.resultDesc || "Payment was not completed.", "error");
+            return;
+          }
+        } catch (_) {
+          // Keep waiting quietly if a status request temporarily fails.
+        }
+      }
+    }
+  </script>
+</body>
+</html>
